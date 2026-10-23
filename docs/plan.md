@@ -1,133 +1,125 @@
-# AI Job-Search Agent MVP v0.1 Plan
+# AI Job-Search Agent MVP v0.1
 
-## Approved scope
+## Mission and confirmed requirements
 
-Build a browser-based job discovery and tracking app with Level 3 autonomy for internal discovery, research, matching, document preparation, and tracking. Discovery is scheduled daily. The baseline must work without an AI API key. Every external action requires explicit approval, and v0.1 stores approval records and enforces server-side policy checks but does not execute external actions.
+Local-first browser app for internal discovery, research, matching, document preparation, and application tracking. Search balances remote work explicitly eligible from Mexico, Texas opportunities, and Monterrey-area roles. Target families include solutions architecture/engineering, technical account and customer success, AI/API integration, technical product/operations, fintech, data platforms, and identity security. Daily discovery is supported through a protected endpoint. No application, email, recruiter message, or other external action occurs without per-action explicit user approval; v0.1 records approval decisions but does not execute external actions.
 
-The job search balances remote roles eligible from Mexico, Texas opportunities, and Monterrey-area roles. Target role areas are technical solutions, technical account management, AI integration, fintech, technical product/operations, data, and identity security. Never invent candidate qualifications or infer work authorization or visa eligibility without evidence.
+The initial profile is user-provided. All profile claims are candidate-reported and are not independently verified. Dates, institutions, qualifications, production ML engineering, advanced quantitative research, and work authorization are not filled in unless supplied as evidence. Unknown eligibility is never treated as eligible.
 
-## Architecture and technology
+## Current implementation
 
-- Next.js and TypeScript for the web app and server endpoints.
-- SQLite and Prisma for the initial database.
-- Persistence is accessed through repository interfaces so domain logic does not depend directly on Prisma.
-- A daily scheduled endpoint invokes discovery. Each run is recorded and is safe to repeat.
-- Source adapters are server-side, independently configurable, and limited to permitted access methods. The first vertical slice uses manual job URL entry and one source adapter; verify the source and its terms before implementing that adapter.
-- AI is optional behind an interface. Matching and approval decisions are deterministic and work without a provider key.
+- Next.js App Router and TypeScript; SQLite local database behind repository interfaces.
+- Single-account first-run setup, password hashing, signed HTTP-only/SameSite cookies, and protected APIs.
+- Editable seeded candidate profile with visible review flags.
+- Manual HTTPS job URL entry and a Greenhouse Job Board API adapter. Manual URLs are stored as source evidence and never fetched.
+- Configurable Greenhouse public-board token saved locally; importer bounds responses, times out, validates board token and posting URLs, and records run success/failure.
+- Bearer-protected scheduled discovery route reuses the saved source and importer. A scheduler must be operated by the user.
+- Job URL deduplication, field-level evidence history, deterministic component match scoring, explanations, and explicit supported/contradicted/unknown work-eligibility state.
+- Job tracking states and notes.
+- Editable template-generated cover letter and resume highlights drawn only from candidate profile text.
+- Payload-bound, expiring approval records with audit events. No external-action executor or application submission endpoint exists.
+- Automated tests for deduplication, evidence preservation, unknown eligibility, authentication/session validation, and approval expiry/replay.
 
-### SQLite trade-offs before deployment
+### Database implementation deviation
 
-SQLite is simple, inexpensive, and suitable for local development and a single-instance MVP. It has limited concurrent write throughput, and a local database file needs persistent storage, backup, restore, and migration planning. Multi-instance hosting, higher write concurrency, or managed availability may require Postgres. Reassess these constraints before deployment; no deployment is in this milestone.
+The approved technology choice was SQLite plus Prisma. The repository did not contain Prisma, the package was not present in the dependency cache, and package registry access did not complete in this environment. To deliver a usable local application without claiming an unverified install, this increment uses Node's built-in `node:sqlite` through repository interfaces. Migrate that adapter to Prisma when registry access is available; the data-access boundary is designed for this. No deployment should proceed until this trade-off is reviewed.
+
+## Architecture
+
+- **Web/UI/API:** Next.js App Router with TypeScript.
+- **Persistence:** SQLite with repository interfaces. SQLite is simple and low-cost for local or single-instance use but has limited concurrent writes and requires persistent file storage, backup/restore, and migration planning. Reconsider Postgres for multi-instance or high-concurrency hosting.
+- **Discovery:** Server-side source adapters, separately bounded and observable. Greenhouse is the first adapter; manual links are never fetched. The scheduled route is called by a scheduler configured by the operator.
+- **AI:** No AI dependency in the baseline. Matching and materials work deterministically without an API key.
+- **External actions:** approval records and decision checks only; no external execution in v0.1.
+
+### Greenhouse access verification
+
+Verified against Greenhouse's official [Job Board API documentation](https://docs.greenhouse.io/job-board) and [API overview](https://support.greenhouse.io/hc/en-us/articles/10568627186203-Greenhouse-API-overview) on 2026-10-23. Greenhouse documents JSON GET endpoints for public job-board data and describes the API as a way to access public job posts. This app calls only the public job-list GET endpoint; the separate authenticated application-submission endpoint is not implemented or called. Users supply a board token.
 
 ## Directory structure
 
 ```text
 src/
   app/                    # Dashboard and API routes
-  components/             # UI components
-  domain/
-    jobs/                 # Job, source, evidence, matching rules
-    approvals/            # Approval policy and state transitions
-    candidate/            # User-entered candidate profile
-  adapters/
-    sources/              # Permitted source adapters
-    persistence/          # Repository interfaces and Prisma implementations
-    ai/                   # Optional AI provider interface
-  services/
-    discovery/            # Discovery orchestration
-    matching/             # Transparent matching
-    approvals/             # Server-side approval checks
-  lib/                    # Auth, validation, logging, configuration
-prisma/
-  schema.prisma
-  migrations/
-tests/
-  unit/
-  integration/
-docs/
-  plan.md
+  components/             # Dashboard UI
+  domain/                 # Job types and deterministic matching
+  adapters/persistence/   # Repository interfaces and SQLite adapter
+  services/               # Discovery and application-material generation
+  lib/                    # Authentication and HTTP validation
+tests/                    # SQLite-backed unit/integration checks
+docs/plan.md
 ```
 
-## Initial data model
+## Data model
 
-- **User:** ID, email, password hash or auth subject, timestamps.
-- **CandidateProfile:** user ID, role/location preferences, exclusions, profile version.
-- **Qualification:** profile ID, user-entered claim, category, evidence note, verification status, timestamp. Claims are never fabricated.
-- **JobSource:** stable key, name, adapter type, enabled state, non-secret configuration, last run status.
-- **DiscoveryRun:** source, start/end, status, counts, error summary.
-- **Job:** canonical ID, title, employer, description, employment type, listed compensation, original URL, normalized location/remote details, first/last seen, deduplication key.
-- **JobEvidence:** job, field name, captured value, source URL, retrieval timestamp, optional excerpt/raw reference. Retain history when values change.
-- **WorkEligibilityAssessment:** job, candidate profile version, region, supported/contradicted/unknown status, evidence references, explanation, assessment time. Unknown is not eligible.
-- **MatchAssessment:** job, profile version, total and component scores, matched/missing criteria, explanation, assessment time.
-- **ApprovalRequest:** user, job, action, exact payload or payload hash, status, created/expiry/decision times, decision actor.
-- **ExternalActionLog:** approval request, action, status, timestamp, result/reference, idempotency key. In v0.1 there is no external-action executor.
+- **User/session:** one initial account; scrypt password hash, salt, expiring hashed session token.
+- **CandidateProfile:** JSON profile with summary, target roles, regions, qualifications, and review flags; version increments on save.
+- **Job:** normalized posting, original HTTPS URL, source, remote clue, work eligibility, status, notes, deduplication key, timestamps.
+- **JobEvidence:** field value, source URL, retrieval timestamp. New values append snapshots; unchanged values are not duplicated.
+- **DiscoveryRun:** source, start/end, success/failure, imported count, error.
+- **ApprovalRequest:** action, exact payload, payload hash, pending/approved/rejected state, expiry, decision time.
+- **AuditLog:** requested/approved/rejected/denied event history.
+- **ApplicationMaterial:** editable generated draft tied to a job and type.
+- **Settings:** local Greenhouse board token. It is a public-board identifier, not an API credential.
 
-Use relational records for core entities and JSON only for source-specific payload details. Keep database operations behind repository interfaces.
+## Matching and evidence
 
-## Source adapter design
+Match score is a weighted, inspectable heuristic: role wording (35%), experience/skill-term overlap (30%), location clues (20%), and explicit eligibility evidence (15%). Each result includes component values, matched terms, missing criteria, and an explanation. Treat the score as a review aid, not a probability. Eligibility changes to supported/contradicted only when an evidence note is present. Greenhouse's parser recognizes only explicit Mexico work-location statements; all other cases stay unknown. Candidate profile terms are reported claims, not verified facts.
 
-An adapter fetches a bounded batch, normalizes job records, and returns source provenance. Every imported job includes a source key, original URL, and retrieval time. Adapters use timeouts, rate and response-size limits, safe parsing, and independent error handling. Runs persist per-source outcomes. Upsert by stable source ID when available, otherwise a conservative normalized-URL key. Preserve field-level evidence snapshots when listing details change. Confirm source terms and access rules before implementing the first adapter; start with manual URL entry and one permitted adapter only.
-
-## Evidence and transparent matching
-
-Use explicit criteria for role/skill overlap, seniority when evidence exists, target domain, regional preference, and exclusions. Store component scores, matched and missing criteria, and a plain-language explanation. Separate job posting evidence from candidate claims. Keep source URLs, retrieval timestamps, and field-level evidence for important job details. Represent work-location eligibility as supported, contradicted, or unknown with cited evidence; never treat unknown as eligible. Do not infer candidate qualifications or visa/work authorization.
+Every imported/manual job retains its source URL and retrieval time per changed field. Job descriptions and imported HTML are untrusted input; text is stripped/escaped before display. Manual URLs are not fetched, which avoids arbitrary-URL server-side request forgery.
 
 ## Approval policy
 
-In v0.1, approval requests and server-side policy checks are implemented, but external-action execution is absent. Future execution must require an authenticated owner, explicit approval bound to action, target, exact payload and expiry, unchanged payload hash, and an idempotency key. Payload changes require a new approval. Each application submission, email, recruiter message, or other external action requires its own approval and audit record. No discovery or matching process may initiate an external action.
+An authenticated user creates a request bound to a job, action, exact payload and SHA-256 hash, with a 24-hour expiry. Server-side decision checks require a pending, unexpired record whose payload hash still matches. Decisions are audited; repeated or expired decisions are rejected. No route invokes an external system. Each future application submission, email, recruiter message, or other external action will need its own explicit approval and separate execution controls.
 
-## Security and cost approach
+## Security and cost controls
 
-- Require authentication and ownership checks for profile, tracking, and approval data; protect scheduled discovery with a secret.
-- Validate and bound input, escape source content, use secure session cookies and CSRF protection when applicable, and rate limit sensitive endpoints.
-- Keep secrets in environment configuration; never commit credentials. Do not log sensitive candidate data.
-- Treat postings and source payloads as untrusted data and never as instructions.
-- Limit source timeouts, response size, and request rates. Use least privilege and document SQLite backup/restore.
-- Keep AI optional and budget controlled. Start local; use only a cost-conscious single-instance approach if deployment is later approved. No services are purchased, configured, or deployed in this milestone.
+- First-run single account; password minimum 12 characters; scrypt hashes; session cookies are HTTP-only, SameSite strict, and secure in production.
+- Production requires `SESSION_SECRET`; the scheduled endpoint requires `SCHEDULE_SECRET` and a bearer header.
+- Validate content type, request size, fields, HTTPS job URLs, Greenhouse token, source response size, and fetch timeout. Fixed Greenhouse hostname prevents arbitrary outbound fetches.
+- No user-controlled HTML rendering, source instructions, AI tool use, or external action execution.
+- No secrets or local DB committed. No paid integrations, AI provider, deployment, or outreach.
+- Add rate limiting, session cleanup, backup/restore automation, and multi-user ownership before public deployment.
 
-## MVP v0.1 milestones and acceptance criteria
+## Acceptance criteria and status
 
-### 1. Foundation and documentation (current increment)
+### Foundation
 
-- Project scaffold, local setup README, and this approved plan are present.
-- Local development and automated checks have documented commands.
-- Baseline configuration requires no credentials or AI API key.
+- [x] Local app shell, setup instructions, approved scope.
+- [x] Baseline needs no AI key.
 
-### 2. Profile and preferences
+### Profile and discovery
 
-- User can enter target roles, regions, exclusions, and evidence-backed qualifications.
-- Profile changes persist and are versioned; user claims are distinguished from verified facts.
+- [x] Editable, candidate-reported profile with review flags.
+- [x] Manual job URL entry plus one officially documented public source adapter.
+- [x] Idempotent URL upsert and field-level evidence history.
+- [x] Discovery success/failure records and protected scheduled endpoint.
 
-### 3. Discovery vertical slice
+### Evidence, matching, tracking, and materials
 
-- Manual job URL entry plus one adapter whose terms and permitted access method have been verified.
-- Discovery runs record timestamps and per-source outcomes; failure of the adapter is visible.
-- Repeated ingestion deduplicates jobs without losing evidence history.
-- Each source field retains its URL and retrieval timestamp.
+- [x] Source URLs and retrieval times retained per changed field.
+- [x] Unknown eligibility is visible and never counted as supported.
+- [x] Match component scores, matched/missing criteria, and explanation shown.
+- [x] Track job status and notes.
+- [x] Generate and edit profile-grounded cover letter and resume-highlight drafts.
 
-### 4. Evidence and matching
+### Approval and verification
 
-- Every displayed job can be traced to source evidence.
-- Eligibility unknown is explicit and never treated as eligible.
-- Match explanations expose criteria, component scores, and missing information.
-- Candidate qualifications and work eligibility require explicit evidence.
+- [x] Authenticated routes enforce session checks.
+- [x] Approval requests bind action/payload and expire; replay/expired decisions are rejected and audited.
+- [x] No external-action execution is present.
+- [x] Automated tests cover deduplication, evidence, eligibility uncertainty, authentication/session validation, and approval enforcement.
+- [ ] Prisma runtime adapter: pending dependency access (see deviation above).
+- [ ] Production deployment and scheduled-task setup: not authorized/in scope.
 
-### 5. Review and tracking
+## Local checks
 
-- User can save/reject jobs and add notes; states persist.
-- Changed job evidence keeps prior snapshots.
+```sh
+npm test
+npm run typecheck
+npm run build
+```
 
-### 6. Approval foundation and security
+## Next before deployment
 
-- Approval records are bound to user, action, target, and payload; invalid, expired, changed-payload, and cross-user attempts are denied and audited.
-- No endpoint or scheduled job submits applications or sends messages.
-
-### 7. Release readiness (deployment requires separate authorization)
-
-- Clean local setup and checks succeed from the README.
-- SQLite limitations, backup, and restore considerations are documented before any deployment.
-- Scheduled discovery can be invoked securely and its result inspected.
-
-## Automated tests
-
-Add automated tests for deduplication, evidence preservation, unknown eligibility, authentication and authorization, and approval enforcement. Do not claim a test passed unless it was run successfully. Verify the foundation increment before starting the next milestone.
+Move persistence to the approved Prisma adapter when package access permits; add rate limiting and explicit multi-user ownership if needed; document/verify SQLite backup and restore or choose Postgres; set persistent secrets; configure a scheduler; review security and privacy; then obtain separate deployment authorization.

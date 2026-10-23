@@ -4,5 +4,5 @@ coverage/
 *.tsbuildinfo
 .env*
 !.env.example
-prisma/*.db
-prisma/*.db-journal
+data/*.sqlite
+data/*.sqlite-*

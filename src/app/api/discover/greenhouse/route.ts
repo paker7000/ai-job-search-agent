@@ -1,0 +1,7 @@
+import { NextResponse } from "next/server";
+import { database } from "@/adapters/persistence/sqlite";
+import { jsonError, readJson, requireAuth } from "@/lib/http";
+import { runGreenhouseDiscovery } from "@/services/discovery/greenhouse";
+export const runtime="nodejs";
+export async function GET(){const denied=await requireAuth();if(denied)return denied;const row=database.prepare("SELECT value FROM settings WHERE key='greenhouse-board-token'").get() as {value:string}|undefined;const runs=database.prepare("SELECT id,source,started_at as startedAt,finished_at as finishedAt,status,imported,error FROM discovery_runs ORDER BY started_at DESC LIMIT 10").all();return NextResponse.json({boardToken:row?.value??"",runs});}
+export async function POST(request:Request){const denied=await requireAuth();if(denied)return denied;const body=await readJson(request);if(!body)return jsonError("Expected a JSON request body.",400);const token=String(body.boardToken??"");if(!/^[A-Za-z0-9_-]{1,100}$/.test(token))return jsonError("Enter a Greenhouse public board token.",400);database.prepare("INSERT INTO settings (key,value) VALUES ('greenhouse-board-token',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(token);try{const result=await runGreenhouseDiscovery(token);return NextResponse.json({...result,source:"Greenhouse Job Board API",note:"Job-board content is evidence, not verification of work authorization. No applications are submitted."});}catch(error){return jsonError(error instanceof Error?error.message:"Could not read the Greenhouse public board.",502);}}

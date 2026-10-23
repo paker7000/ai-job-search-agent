@@ -1,0 +1,8 @@
+import { NextResponse } from "next/server";
+import { approvalRepo, jobRepo } from "@/adapters/persistence/sqlite";
+import { jsonError, readJson, requireAuth } from "@/lib/http";
+const actions=["application_submission","email","recruiter_message","other_external_action"] as const;
+export const runtime="nodejs";
+export async function GET(){const denied=await requireAuth();if(denied)return denied;return NextResponse.json({approvals:approvalRepo.all()});}
+export async function POST(request:Request){const denied=await requireAuth();if(denied)return denied;const body=await readJson(request);if(!body)return jsonError("Expected a JSON request body.",400);const jobId=String(body.jobId??"");const action=String(body.action??"");const payload=String(body.payload??"");if(!jobRepo.all().some(j=>j.id===jobId))return jsonError("Job not found.",404);if(!actions.includes(action as typeof actions[number])||!payload.trim()||payload.length>20000)return jsonError("Invalid action or payload.",400);return NextResponse.json({approval:approvalRepo.create(jobId,action,payload)},{status:201});}
+export async function PATCH(request:Request){const denied=await requireAuth();if(denied)return denied;const body=await readJson(request);if(!body)return jsonError("Expected a JSON request body.",400);if(body.status!=="approved"&&body.status!=="rejected")return jsonError("Decision must be approved or rejected.",400);const approval=approvalRepo.decide(String(body.id??""),body.status);return approval?NextResponse.json({approval,externalActionExecuted:false}):jsonError("Approval is missing, expired, already decided, or invalid.",409);}
