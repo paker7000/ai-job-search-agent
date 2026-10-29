@@ -2,9 +2,9 @@ import { randomUUID, createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Approval, CandidateProfile, Evidence, Job, JobInput } from "@/domain/types";
+import type { Approval, CandidateProfile, Evidence, Job, JobInput, SearchPreferences } from "@/domain/types";
 import { assessEligibility, jobDedupeKey, matchJob } from "@/domain/matching";
-import type { ApprovalRepository, JobRepository, ProfileRepository } from "./repository";
+import type { ApprovalRepository, JobRepository, ProfileRepository, SearchPreferencesRepository } from "./repository";
 
 export const defaultProfile: CandidateProfile = {
   summary: "Former MSCI Inc. Vice President (October 2009–April 2024), supporting financial software, enterprise SaaS, client technology, and technical operations. Technical Support and Product Management Lead at Code2Trust since May 2024, including AI and e-commerce consulting.",
@@ -102,6 +102,39 @@ export const profileRepo: ProfileRepository = {
   save(profile) {
     const cleaned = { summary: profile.summary.slice(0,10000), roles: profile.roles.slice(0,80).map((x)=>x.slice(0,160)), regions: profile.regions.slice(0,30).map((x)=>x.slice(0,160)), qualifications: profile.qualifications.slice(0,100).map((x)=>x.slice(0,300)), reviewFlags: profile.reviewFlags.slice(0,30).map((x)=>x.slice(0,500)) };
     database.prepare("INSERT INTO profile (id,body,version) VALUES (1,?,1) ON CONFLICT(id) DO UPDATE SET body=excluded.body,version=profile.version+1").run(JSON.stringify(cleaned));
+    return cleaned;
+  },
+};
+
+const defaultSearchPreferences = (): SearchPreferences => ({
+  locations: ["Mexico", "Monterrey area", "Texas"],
+  titleKeywords: profileRepo.get().roles,
+  // Suggested from employers and technology companies explicitly mentioned in the candidate profile.
+  companyKeywords: ["MSCI", "Code2Trust", "Salesforce", "Snowflake", "SailPoint"],
+});
+
+function normalizeSearchPreferences(value: SearchPreferences): SearchPreferences {
+  const clean = (items: unknown, maxItems: number, maxLength: number) =>
+    Array.isArray(items) ? [...new Set(items.filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim().slice(0, maxLength)).filter(Boolean))].slice(0, maxItems) : [];
+  return {
+    locations: clean(value.locations, 20, 120),
+    titleKeywords: clean(value.titleKeywords, 60, 120),
+    companyKeywords: clean(value.companyKeywords, 60, 120),
+  };
+}
+
+export const searchPreferencesRepo: SearchPreferencesRepository = {
+  get() {
+    const row = database.prepare("SELECT value FROM settings WHERE key='search_preferences'").get() as { value: string } | undefined;
+    if (!row) return this.save(defaultSearchPreferences());
+    try { return normalizeSearchPreferences(JSON.parse(row.value) as SearchPreferences); }
+    catch { return this.save(defaultSearchPreferences()); }
+  },
+  save(preferences) {
+    const cleaned = normalizeSearchPreferences(preferences);
+    database.prepare("INSERT INTO settings (key,value) VALUES ('search_preferences',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .run(JSON.stringify(cleaned));
     return cleaned;
   },
 };

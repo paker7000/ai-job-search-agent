@@ -18,6 +18,7 @@ The initial profile is user-provided. All profile claims are candidate-reported 
 - Job tracking states and notes.
 - Editable template-generated cover letter and resume highlights drawn only from candidate profile text.
 - Payload-bound, expiring approval records with audit events. No external-action executor or application submission endpoint exists.
+- Editable search preferences, defaulting to Mexico, Monterrey area, and Texas, with profile-derived role terms and company-name suggestions grounded in profile mentions. Each location creates an independent query preview; source fan-out and destination links are separate stages.
 - Automated tests for deduplication, evidence preservation, unknown eligibility, authentication/session validation, and approval expiry/replay.
 
 ### Database implementation deviation
@@ -94,6 +95,11 @@ An authenticated user creates a request bound to a job, action, exact payload an
 - [x] Manual job URL entry plus one officially documented public source adapter.
 - [x] Idempotent URL upsert and field-level evidence history.
 - [x] Discovery success/failure records and protected scheduled endpoint.
+- [x] Editable multi-location search preferences, profile-derived title terms, and editable profile-mentioned company suggestions.
+- [x] Each selected location yields a distinct generated search query.
+- [ ] Ten search destinations (five general and five remote-focused) listed in a provider registry; use documented feeds/APIs only where permitted and prefilled searches otherwise.
+- [ ] Ranked results presented in a sortable table with supported date, salary, work-mode, and employment-type filters.
+- [x] Alerts and notifications remain out of scope.
 
 ### Evidence, matching, tracking, and materials
 

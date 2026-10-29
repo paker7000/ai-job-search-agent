@@ -7,22 +7,27 @@ A local-first browser app for evidence-based job discovery, fit review, applicat
 - Node.js 24 recommended (`node:sqlite` is used for persistence).
 - npm.
 
-## Run locally
+## Start and stop locally (Windows PowerShell)
+
+Open PowerShell in the project folder. On the first run, install dependencies; then set local secrets and start the development server:
 
 ```powershell
 npm install
 $env:SESSION_SECRET = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 $env:SCHEDULE_SECRET = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-npm run dev
+npm run dev -- --hostname 127.0.0.1
 ```
 
-Open `http://localhost:3000`. On first use, create the single local account with a unique password of at least 12 characters. Keep the two secrets available to the app process; in production, configure a persistent `SESSION_SECRET` or sessions will be invalidated when it changes. No AI key is needed. The default database is `data/agent.sqlite`; override it with `DATABASE_PATH`.
+Keep that terminal open while using the app at [http://localhost:3000](http://localhost:3000). To stop it, focus the same terminal and press **Ctrl+C**. Run the commands again to start it later. Generating a new `SESSION_SECRET` on restart invalidates existing browser sessions, so sign in again; it does not delete the local account or database. No AI key is needed. The default database is `data/agent.sqlite`; override it with `DATABASE_PATH`.
+
+On first use, create the single local account with a unique password of at least 12 characters. In production, configure a persistent `SESSION_SECRET` or sessions will be invalidated when it changes.
 
 The app starts with the candidate facts and target preferences provided for this project. Facts are labeled candidate-reported, and review flags identify missing details and unconfirmed claims. Edit the profile in the dashboard before using generated materials.
 
 ## Discover jobs
 
 - Paste a job URL manually, or enter a Greenhouse public board token and select **Fetch public roles**. The app uses Greenhouse's documented public Job Board API. It does not crawl arbitrary URLs or submit applications.
+- Edit the search plan's title keywords, company suggestions, and locations (prefilled with Mexico, Monterrey area, and Texas). Each location produces its own query; destination links and authorized source integrations are added in stages.
 - A source run records its outcome, and each changed field retains its source URL and retrieval timestamp.
 - The Greenhouse token is stored locally in SQLite and reused by scheduled discovery.
 - Unknown work-location eligibility remains unknown. Review the posting evidence; the app does not infer visa or work authorization.

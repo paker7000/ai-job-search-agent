@@ -9,6 +9,17 @@ export interface CandidateProfile {
   reviewFlags: string[];
 }
 
+export interface SearchPreferences {
+  locations: string[];
+  titleKeywords: string[];
+  companyKeywords: string[];
+}
+
+export interface LocationSearchQuery {
+  location: string;
+  query: string;
+}
+
 export interface JobInput {
   title: string;
   company: string;

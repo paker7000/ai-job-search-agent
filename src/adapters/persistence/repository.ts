@@ -1,4 +1,4 @@
-import type { Approval, CandidateProfile, Job, JobInput } from "@/domain/types";
+import type { Approval, CandidateProfile, Job, JobInput, SearchPreferences } from "@/domain/types";
 
 export interface JobRepository {
   all(): Job[];
@@ -10,6 +10,11 @@ export interface JobRepository {
 export interface ProfileRepository {
   get(): CandidateProfile;
   save(profile: CandidateProfile): CandidateProfile;
+}
+
+export interface SearchPreferencesRepository {
+  get(): SearchPreferences;
+  save(preferences: SearchPreferences): SearchPreferences;
 }
 
 export interface ApprovalRepository {
