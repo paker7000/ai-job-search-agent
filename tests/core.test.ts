@@ -1,12 +1,32 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { approvalRepo, database, jobRepo, profileRepo } from "@/adapters/persistence/sqlite";
+import { approvalRepo, database, jobRepo, profileRepo, searchPreferencesRepo } from "@/adapters/persistence/sqlite";
 import { createAccount, login, setupStatus, verifySessionCookie } from "@/lib/auth";
-import { assessEligibility, jobDedupeKey, matchJob } from "@/domain/matching";
+import { assessEligibility, buildLocationSearchQueries, jobDedupeKey, matchJob } from "@/domain/matching";
 import { generateMaterials, saveMaterial } from "@/services/materials";
 import type { JobInput } from "@/domain/types";
 
 const role:JobInput={title:"Technical Solutions Architect",company:"Example Fintech",description:"Work from anywhere in Mexico. REST API and Snowflake integrations for financial risk software.",location:"Remote",url:"https://jobs.example.com/role/123?utm_source=mail",source:"manual",remote:true,eligibility:"unknown",eligibilityEvidence:""};
-beforeEach(()=>{database.exec("DELETE FROM approvals; DELETE FROM audit_log; DELETE FROM evidence; DELETE FROM jobs; DELETE FROM profile; DELETE FROM sessions; DELETE FROM auth_failures; DELETE FROM users;");});
+beforeEach(()=>{database.exec("DELETE FROM approvals; DELETE FROM audit_log; DELETE FROM evidence; DELETE FROM jobs; DELETE FROM profile; DELETE FROM sessions; DELETE FROM auth_failures; DELETE FROM users; DELETE FROM settings WHERE key='search_preferences';");});
+
+describe("search preferences and query generation",()=>{
+  it("defaults to three editable location searches and profile-based terms",()=>{
+    const preferences=searchPreferencesRepo.get();
+    expect(preferences.locations).toEqual(["Mexico","Monterrey area","Texas"]);
+    expect(preferences.titleKeywords).toContain("Technical Account Manager");
+    expect(preferences.companyKeywords).toContain("MSCI");
+    expect(buildLocationSearchQueries(preferences)).toHaveLength(3);
+  });
+  it("creates an independent search for each unique selected location",()=>{
+    expect(buildLocationSearchQueries({locations:["Mexico","Texas","Mexico"],titleKeywords:["Solutions Engineer"],companyKeywords:["Snowflake"]})).toEqual([
+      {location:"Mexico",query:'("Solutions Engineer" OR "Snowflake") "Mexico"'},
+      {location:"Texas",query:'("Solutions Engineer" OR "Snowflake") "Texas"'},
+    ]);
+  });
+  it("persists and normalizes user-edited search preferences",()=>{
+    searchPreferencesRepo.save({locations:["  Monterrey  ","Monterrey",""],titleKeywords:["AI Integration"],companyKeywords:["  Example Inc  "]});
+    expect(searchPreferencesRepo.get()).toEqual({locations:["Monterrey"],titleKeywords:["AI Integration"],companyKeywords:["Example Inc"]});
+  });
+});
 
 describe("job evidence and matching",()=>{
   it("deduplicates tracking parameters but keeps functional job identifiers",()=>{
