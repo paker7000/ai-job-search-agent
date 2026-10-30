@@ -60,6 +60,10 @@ function eligibilityEvidence(job: RemoteOkJob): string {
   return matches.length ? `Posting text explicitly states: ${[...new Set(matches)].join("; ")}` : "No explicit work-location eligibility for Mexico was found; eligibility remains unknown.";
 }
 
+function employmentType(job: RemoteOkJob): string | undefined {
+  return job.tags?.find((tag) => /^(full[- ]time|part[- ]time|contract|internship)$/i.test(tag.trim()))?.trim();
+}
+
 export async function runRemoteOkSearch() {
   const preferences = searchPreferencesRepo.get();
   const queries = buildLocationSearchQueries(preferences);
@@ -91,7 +95,7 @@ export async function runRemoteOkSearch() {
           title: posting.position!.slice(0, 240), company: posting.company!.slice(0, 240), description, location,
           url, source: "Remote OK", remote: true, eligibility: evidence.startsWith("Posting text") ? "supported" : "unknown",
           eligibilityEvidence: evidence, publishedAt: posting.date?.slice(0, 80), salary,
-          employmentType: undefined, workType: "Remote", searchLocation: query.location, searchQuery: query.query,
+          employmentType: employmentType(posting), workType: "Remote", searchLocation: query.location, searchQuery: query.query,
         }, retrievedAt);
         imported++;
       }
