@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY, dedupe_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, company TEXT NOT NULL,
   description TEXT NOT NULL, location TEXT NOT NULL, url TEXT NOT NULL, source TEXT NOT NULL,
   remote INTEGER NOT NULL, eligibility TEXT NOT NULL, eligibility_evidence TEXT NOT NULL,
+  published_at TEXT, salary TEXT, employment_type TEXT, work_type TEXT,
   status TEXT NOT NULL DEFAULT 'discovered', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS evidence (
@@ -43,10 +44,15 @@ CREATE TABLE IF NOT EXISTS discovery_runs (id TEXT PRIMARY KEY, source TEXT NOT 
 CREATE TABLE IF NOT EXISTS application_materials (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE, kind TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 `);
 
+const jobColumns = new Set((database.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>).map((column) => column.name));
+for (const [column, definition] of [["published_at", "TEXT"], ["salary", "TEXT"], ["employment_type", "TEXT"], ["work_type", "TEXT"]] as const) {
+  if (!jobColumns.has(column)) database.exec(`ALTER TABLE jobs ADD COLUMN ${column} ${definition}`);
+}
+
 function hydrate(row: Record<string, unknown>): Job {
   const evidence = database.prepare("SELECT field, value, source_url as sourceUrl, retrieved_at as retrievedAt FROM evidence WHERE job_id = ? ORDER BY id").all(String(row.id)) as unknown as Evidence[];
   const input: JobInput = {
-    title: String(row.title), company: String(row.company), description: String(row.description), location: String(row.location), url: String(row.url), source: String(row.source), remote: Boolean(row.remote), eligibility: row.eligibility as JobInput["eligibility"], eligibilityEvidence: String(row.eligibility_evidence),
+    title: String(row.title), company: String(row.company), description: String(row.description), location: String(row.location), url: String(row.url), source: String(row.source), remote: Boolean(row.remote), eligibility: row.eligibility as JobInput["eligibility"], eligibilityEvidence: String(row.eligibility_evidence), publishedAt: row.published_at ? String(row.published_at) : undefined, salary: row.salary ? String(row.salary) : undefined, employmentType: row.employment_type ? String(row.employment_type) : undefined, workType: row.work_type ? String(row.work_type) : undefined,
   };
   return { ...input, id: String(row.id), dedupeKey: String(row.dedupe_key), status: row.status as Job["status"], notes: String(row.notes), createdAt: String(row.created_at), updatedAt: String(row.updated_at), evidence, match: matchJob(input, profileRepo.get()) };
 }
@@ -60,12 +66,14 @@ export const jobRepo: JobRepository = {
     const existing = database.prepare("SELECT id FROM jobs WHERE dedupe_key = ?").get(key) as { id: string } | undefined;
     const id = existing?.id ?? randomUUID();
     const now = new Date().toISOString();
-    database.prepare(`INSERT INTO jobs (id,dedupe_key,title,company,description,location,url,source,remote,eligibility,eligibility_evidence,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(dedupe_key) DO UPDATE SET title=excluded.title,company=excluded.company,description=excluded.description,location=excluded.location,url=excluded.url,source=excluded.source,remote=excluded.remote,eligibility=excluded.eligibility,eligibility_evidence=excluded.eligibility_evidence,updated_at=excluded.updated_at`)
-      .run(id,key,input.title.slice(0,240),input.company.slice(0,240),input.description.slice(0,50000),input.location.slice(0,500),input.url,input.source.slice(0,120),input.remote?1:0,input.eligibility,input.eligibilityEvidence.slice(0,3000),now,now);
+    database.prepare(`INSERT INTO jobs (id,dedupe_key,title,company,description,location,url,source,remote,eligibility,eligibility_evidence,published_at,salary,employment_type,work_type,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(dedupe_key) DO UPDATE SET title=excluded.title,company=excluded.company,description=excluded.description,location=excluded.location,url=excluded.url,source=excluded.source,remote=excluded.remote,eligibility=excluded.eligibility,eligibility_evidence=excluded.eligibility_evidence,published_at=excluded.published_at,salary=excluded.salary,employment_type=excluded.employment_type,work_type=excluded.work_type,updated_at=excluded.updated_at`)
+      .run(id,key,input.title.slice(0,240),input.company.slice(0,240),input.description.slice(0,50000),input.location.slice(0,500),input.url,input.source.slice(0,120),input.remote?1:0,input.eligibility,input.eligibilityEvidence.slice(0,3000),input.publishedAt?.slice(0,80)??null,input.salary?.slice(0,240)??null,input.employmentType?.slice(0,120)??null,input.workType?.slice(0,120)??null,now,now);
     const evidence = database.prepare("INSERT INTO evidence (job_id,field,value,source_url,retrieved_at) VALUES (?,?,?,?,?)");
-    for (const field of ["title", "company", "description", "location", "remote", "eligibility", "eligibilityEvidence"] as const) {
-      const value = String(input[field]);
+    for (const field of ["title", "company", "description", "location", "remote", "eligibility", "eligibilityEvidence", "publishedAt", "salary", "employmentType", "workType", "searchLocation", "searchQuery"] as const) {
+      const raw = input[field];
+      if (raw === undefined || raw === "") continue;
+      const value = String(raw);
       const previous = database.prepare("SELECT value FROM evidence WHERE job_id=? AND field=? ORDER BY id DESC LIMIT 1").get(id, field) as { value: string } | undefined;
       if (!previous || previous.value !== value) evidence.run(id,field,value,input.url,retrievedAt);
     }

@@ -15,6 +15,16 @@ export interface SearchPreferences {
   companyKeywords: string[];
 }
 
+export type SearchDestinationGroup = "general" | "remote";
+export interface SearchDestination {
+  id: string;
+  label: string;
+  group: SearchDestinationGroup;
+  url: string;
+  access: "direct-search" | "link-out" | "public-feed";
+  note: string;
+}
+
 export interface LocationSearchQuery {
   location: string;
   query: string;
@@ -30,6 +40,12 @@ export interface JobInput {
   remote: boolean;
   eligibility: Eligibility;
   eligibilityEvidence: string;
+  publishedAt?: string;
+  salary?: string;
+  employmentType?: string;
+  workType?: string;
+  searchLocation?: string;
+  searchQuery?: string;
 }
 
 export interface Job extends JobInput {

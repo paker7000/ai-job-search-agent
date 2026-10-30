@@ -19,6 +19,8 @@ The initial profile is user-provided. All profile claims are candidate-reported 
 - Editable template-generated cover letter and resume highlights drawn only from candidate profile text.
 - Payload-bound, expiring approval records with audit events. No external-action executor or application submission endpoint exists.
 - Editable search preferences, defaulting to Mexico, Monterrey area, and Texas, with profile-derived role terms and company-name suggestions grounded in profile mentions. Each location creates an independent query preview; source fan-out and destination links are separate stages.
+- Ten search destinations: LinkedIn Jobs, Indeed, Glassdoor, OCC Mundial, Wellfound, Remote OK, Remotive, We Work Remotely, Remote.co, and Working Nomads. LinkedIn/Indeed/Glassdoor direct links are prefilled where known; other sites open their search page with the generated query shown alongside.
+- Remote OK public JSON feed adapter; source attribution and original listing links are shown. No logo is used. Jobs from the feed retain the original listing URL and retrieval timestamp.
 - Automated tests for deduplication, evidence preservation, unknown eligibility, authentication/session validation, and approval expiry/replay.
 
 ### Database implementation deviation
@@ -36,6 +38,10 @@ The approved technology choice was SQLite plus Prisma. The repository did not co
 ### Greenhouse access verification
 
 Verified against Greenhouse's official [Job Board API documentation](https://docs.greenhouse.io/job-board) and [API overview](https://support.greenhouse.io/hc/en-us/articles/10568627186203-Greenhouse-API-overview) on 2026-10-23. Greenhouse documents JSON GET endpoints for public job-board data and describes the API as a way to access public job posts. This app calls only the public job-list GET endpoint; the separate authenticated application-submission endpoint is not implemented or called. Users supply a board token.
+
+### Search destination and Remote OK access verification
+
+Reviewed the sources' own documentation on 2026-10-29. [Remote OK's FAQ](https://remoteok.com/faq) documents free, unauthenticated JSON/RSS feeds and permits sharing/aggregation when Remote OK is credited and every role links to its original post. The adapter uses the public JSON endpoint and follows that attribution requirement. [LinkedIn's API terms](https://developer.linkedin.com/legal) and [scraping policy](https://www.linkedin.com/help/linkedin/answer/a1341387/prohibition-of-scraping-software?intendedLocale=en&lang=en-us) prohibit unapproved scraping; LinkedIn is a search link only. [Remotive's API terms](https://remotive.com/remote-jobs/api) require source attribution and links and prohibit using its listings to collect signups/emails; because this app has account sign-in, Remotive remains link-only. [We Work Remotely's API terms](https://weworkremotely.com/api-terms-and-guidelines) prohibit building a job search service from its data and prohibit storing its data, so it remains link-only despite its public RSS feed. We do not scrape destinations without an authorized interface.
 
 ## Directory structure
 
@@ -97,7 +103,8 @@ An authenticated user creates a request bound to a job, action, exact payload an
 - [x] Discovery success/failure records and protected scheduled endpoint.
 - [x] Editable multi-location search preferences, profile-derived title terms, and editable profile-mentioned company suggestions.
 - [x] Each selected location yields a distinct generated search query.
-- [ ] Ten search destinations (five general and five remote-focused) listed in a provider registry; use documented feeds/APIs only where permitted and prefilled searches otherwise.
+- [x] Ten search destinations (five general and five remote-focused) listed in a provider registry; use documented feeds/APIs only where permitted and prefilled searches otherwise.
+- [x] Import matching Remote OK listings from its public feed with source credit, original job links, retrieval timestamps, and per-location query evidence.
 - [ ] Ranked results presented in a sortable table with supported date, salary, work-mode, and employment-type filters.
 - [x] Alerts and notifications remain out of scope.
 
