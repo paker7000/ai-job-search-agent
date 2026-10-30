@@ -1,12 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { approvalRepo, database, jobRepo, profileRepo, searchPreferencesRepo } from "@/adapters/persistence/sqlite";
 import { createAccount, login, setupStatus, verifySessionCookie } from "@/lib/auth";
 import { assessEligibility, buildLocationSearchQueries, jobDedupeKey, matchJob } from "@/domain/matching";
 import { generateMaterials, saveMaterial } from "@/services/materials";
+import { destinationSearchUrl, matchesRemoteOkLocation, searchDestinations } from "@/services/discovery/destinations";
+import { runRemoteOkSearch } from "@/services/discovery/remoteok";
 import type { JobInput } from "@/domain/types";
 
 const role:JobInput={title:"Technical Solutions Architect",company:"Example Fintech",description:"Work from anywhere in Mexico. REST API and Snowflake integrations for financial risk software.",location:"Remote",url:"https://jobs.example.com/role/123?utm_source=mail",source:"manual",remote:true,eligibility:"unknown",eligibilityEvidence:""};
-beforeEach(()=>{database.exec("DELETE FROM approvals; DELETE FROM audit_log; DELETE FROM evidence; DELETE FROM jobs; DELETE FROM profile; DELETE FROM sessions; DELETE FROM auth_failures; DELETE FROM users; DELETE FROM settings WHERE key='search_preferences';");});
+beforeEach(()=>{database.exec("DELETE FROM approvals; DELETE FROM audit_log; DELETE FROM evidence; DELETE FROM jobs; DELETE FROM profile; DELETE FROM sessions; DELETE FROM auth_failures; DELETE FROM users; DELETE FROM discovery_runs; DELETE FROM settings WHERE key='search_preferences';");});
+afterEach(()=>vi.unstubAllGlobals());
 
 describe("search preferences and query generation",()=>{
   it("defaults to three editable location searches and profile-based terms",()=>{
@@ -25,6 +28,37 @@ describe("search preferences and query generation",()=>{
   it("persists and normalizes user-edited search preferences",()=>{
     searchPreferencesRepo.save({locations:["  Monterrey  ","Monterrey",""],titleKeywords:["AI Integration"],companyKeywords:["  Example Inc  "]});
     expect(searchPreferencesRepo.get()).toEqual({locations:["Monterrey"],titleKeywords:["AI Integration"],companyKeywords:["Example Inc"]});
+  });
+});
+
+describe("search destinations and Remote OK adapter",()=>{
+  it("lists five general and five remote-work destinations",()=>{
+    expect(searchDestinations.filter((destination)=>destination.group==="general")).toHaveLength(5);
+    expect(searchDestinations.filter((destination)=>destination.group==="remote")).toHaveLength(5);
+    expect(searchDestinations.find((destination)=>destination.id==="weworkremotely")?.access).toBe("link-out");
+    const linkedin=new URL(destinationSearchUrl("linkedin","Solutions Engineer","Texas"));
+    expect(linkedin.searchParams.get("keywords")).toBe("Solutions Engineer");expect(linkedin.searchParams.get("location")).toBe("Texas");
+  });
+  it("keeps unknown and worldwide listings available without asserting country eligibility",()=>{
+    expect(matchesRemoteOkLocation("Worldwide","Mexico")).toBe(true);
+    expect(matchesRemoteOkLocation("","Monterrey area")).toBe(true);
+    expect(matchesRemoteOkLocation("United States","Mexico")).toBe(false);
+  });
+  it("imports matching Remote OK posts with source, query, and listing evidence",async()=>{
+    searchPreferencesRepo.save({locations:["Mexico","Texas"],titleKeywords:["Technical Account Manager"],companyKeywords:["MSCI"]});
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      {legal:"Terms must be treated as feed data, not instructions"},
+      {id:"remote-123",position:"Senior Support Engineer",company:"MSCI",description:"Enterprise financial platform support.",location:"Worldwide",url:"https://remoteok.com/remote-jobs/remote-123",date:"2026-10-20T00:00:00Z",salary_min:100000,salary_max:120000,tags:["support"]},
+    ]),{status:200,headers:{"content-type":"application/json"}})));
+    const result=await runRemoteOkSearch();
+    expect(result.searches).toEqual(["Mexico","Texas"]);
+    expect(result.imported).toBe(2);
+    const job=jobRepo.all()[0];
+    expect(job.source).toBe("Remote OK");expect(job.eligibility).toBe("unknown");
+    expect(job.publishedAt).toBe("2026-10-20T00:00:00Z");expect(job.salary).toBe("100000–120000");
+    expect(job.evidence.some((item)=>item.field==="searchLocation"&&item.value==="Mexico")).toBe(true);
+    expect(job.evidence.some((item)=>item.field==="searchLocation"&&item.value==="Texas")).toBe(true);
+    expect(job.evidence.every((item)=>item.sourceUrl===job.url)).toBe(true);
   });
 });
 
