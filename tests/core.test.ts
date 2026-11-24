@@ -6,6 +6,8 @@ import { generateMaterials, saveMaterial } from "@/services/materials";
 import { destinationSearchUrl, matchesRemoteOkLocation, searchDestinations } from "@/services/discovery/destinations";
 import { runRemoteOkSearch } from "@/services/discovery/remoteok";
 import { filterAndSortJobs } from "@/services/job-search";
+import { runDailyDiscovery } from "@/services/discovery/daily";
+import { POST as scheduledDiscoveryPost } from "@/app/api/scheduled/discover/route";
 import type { JobInput } from "@/domain/types";
 
 const role:JobInput={title:"Technical Solutions Architect",company:"Example Fintech",description:"Work from anywhere in Mexico. REST API and Snowflake integrations for financial risk software.",location:"Remote",url:"https://jobs.example.com/role/123?utm_source=mail",source:"manual",remote:true,eligibility:"unknown",eligibilityEvidence:""};
@@ -87,7 +89,37 @@ describe("ranked results filters and sorting",()=>{
   });
 });
 
+describe("daily discovery orchestration and access control",()=>{
+  it("runs configured sources sequentially and continues after a source failure",async()=>{
+    const calls:string[]=[];
+    const result=await runDailyDiscovery("greenhouse-board",{
+      greenhouse:async()=>{calls.push("Greenhouse");throw new Error("board unavailable");},
+      remoteOk:async()=>{calls.push("Remote OK");return {imported:3,retrievedAt:"2026-10-29T00:00:00.000Z",searches:["Mexico"],source:"Remote OK"};},
+    });
+    expect(calls).toEqual(["Greenhouse","Remote OK"]);
+    expect(result).toMatchObject({status:"partial",imported:3,sources:[{source:"Greenhouse",status:"failed"},{source:"Remote OK",status:"success",imported:3}]});
+  });
+  it("runs Remote OK without a Greenhouse token and reports a skipped source",async()=>{
+    const greenhouse=vi.fn();const remoteOk=vi.fn().mockResolvedValue({imported:0,retrievedAt:"2026-10-29T00:00:00.000Z",searches:["Mexico"],source:"Remote OK"});
+    const result=await runDailyDiscovery(undefined,{greenhouse,remoteOk});
+    expect(greenhouse).not.toHaveBeenCalled();expect(remoteOk).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({status:"success",sources:[{source:"Greenhouse",status:"skipped"},{source:"Remote OK",status:"success"}]});
+  });
+  it("rejects daily discovery without the exact bearer secret",async()=>{
+    const prior=process.env.SCHEDULE_SECRET;process.env.SCHEDULE_SECRET="expected-secret";
+    try {
+      const response=await scheduledDiscoveryPost(new Request("http://localhost/api/scheduled/discover",{method:"POST",headers:{authorization:"Bearer wrong-secret"}}));
+      expect(response.status).toBe(401);expect(await response.json()).toMatchObject({error:"Unauthorized"});
+    } finally { if(prior===undefined)delete process.env.SCHEDULE_SECRET;else process.env.SCHEDULE_SECRET=prior; }
+  });
+});
+
 describe("job evidence and matching",()=>{
+  it("records skipped roles separately so swipe review can move to the next job",()=>{
+    const job=jobRepo.upsert(role);
+    expect(jobRepo.update(job.id,{status:"skipped"})?.status).toBe("skipped");
+    expect(jobRepo.all()[0].status).toBe("skipped");
+  });
   it("deduplicates tracking parameters but keeps functional job identifiers",()=>{
     expect(jobDedupeKey(role.url)).toBe("https://jobs.example.com/role/123");
     expect(jobDedupeKey("https://jobs.example.com/role?id=1")).not.toBe(jobDedupeKey("https://jobs.example.com/role?id=2"));

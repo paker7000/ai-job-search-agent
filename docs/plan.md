@@ -22,6 +22,8 @@ The initial profile is user-provided. All profile claims are candidate-reported 
 - Ten search destinations: LinkedIn Jobs, Indeed, Glassdoor, OCC Mundial, Wellfound, Remote OK, Remotive, We Work Remotely, Remote.co, and Working Nomads. LinkedIn/Indeed/Glassdoor direct links are prefilled where known; other sites open their search page with the generated query shown alongside.
 - Remote OK public JSON feed adapter; source attribution and original listing links are shown. No logo is used. Jobs from the feed retain the original listing URL and retrieval timestamp.
 - Ranked, sortable job-results table with keyword, search-location, posted-date, work-mode, salary-stated, employment-type, and application-status filters. Each row exposes score rationale, source evidence, eligibility evidence, and tracking/material controls.
+- Swipeable quick-review queue with explicit shortlist/skip actions, a dedicated editable document review, local downloads, manual application-page handoff, and a confirmed local “applied” tracking action. The app does not submit applications or upload files.
+- The protected daily-discovery endpoint runs configured Greenhouse and Remote OK sources sequentially and reports per-source status; the PowerShell helper can be invoked by Windows Task Scheduler while the local app is running.
 - Automated tests for deduplication, evidence preservation, unknown eligibility, authentication/session validation, and approval expiry/replay.
 
 ### Database implementation deviation
@@ -107,6 +109,7 @@ An authenticated user creates a request bound to a job, action, exact payload an
 - [x] Ten search destinations (five general and five remote-focused) listed in a provider registry; use documented feeds/APIs only where permitted and prefilled searches otherwise.
 - [x] Import matching Remote OK listings from its public feed with source credit, original job links, retrieval timestamps, and per-location query evidence.
 - [x] Ranked results presented in a sortable table with supported date, salary-status, work-mode, and employment-type filters.
+- [x] Protected daily discovery fans out to the configured Greenhouse board and Remote OK; failures are reported per source and do not prevent the other source from running.
 - [x] Alerts and notifications remain out of scope.
 
 ### Evidence, matching, tracking, and materials

@@ -4,7 +4,7 @@ import { jsonError, readJson, requireAuth } from "@/lib/http";
 import type { ApplicationStatus } from "@/domain/types";
 
 export const runtime="nodejs";
-const statuses:ApplicationStatus[]=["discovered","interested","preparing","applied","interviewing","offer","rejected","archived"];
+const statuses:ApplicationStatus[]=["discovered","interested","skipped","preparing","applied","interviewing","offer","rejected","archived"];
 export async function PATCH(request:Request,context:{params:Promise<{id:string}>}) {
   const denied=await requireAuth();if(denied)return denied;
   const body=await readJson(request);if(!body)return jsonError("Expected a JSON request body.",400);

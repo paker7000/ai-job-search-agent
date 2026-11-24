@@ -1,5 +1,5 @@
 export type Eligibility = "supported" | "contradicted" | "unknown";
-export type ApplicationStatus = "discovered" | "interested" | "preparing" | "applied" | "interviewing" | "offer" | "rejected" | "archived";
+export type ApplicationStatus = "discovered" | "interested" | "skipped" | "preparing" | "applied" | "interviewing" | "offer" | "rejected" | "archived";
 
 export interface CandidateProfile {
   summary: string;
