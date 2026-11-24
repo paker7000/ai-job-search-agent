@@ -1,4 +1,4 @@
-import type { CandidateProfile, JobInput, MatchResult } from "./types";
+import type { CandidateProfile, JobInput, LocationSearchQuery, MatchResult, SearchPreferences } from "./types";
 
 const normalize = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ");
 
@@ -47,4 +47,12 @@ export function jobDedupeKey(url: string) {
   for (const key of [...parsed.searchParams.keys()]) if (/^(utm_.+|ref|source|trackingid)$/i.test(key)) parsed.searchParams.delete(key);
   parsed.hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
   return parsed.toString().replace(/\/$/, "").toLowerCase();
+}
+
+export function buildLocationSearchQueries(preferences: SearchPreferences): LocationSearchQuery[] {
+  const terms = [...new Set([...preferences.titleKeywords, ...preferences.companyKeywords]
+    .map((term) => term.trim()).filter(Boolean))];
+  const expression = terms.map((term) => `"${term.replace(/["\\]/g, "")}"`).join(" OR ");
+  return [...new Set(preferences.locations.map((location) => location.trim()).filter(Boolean))]
+    .map((location) => ({ location, query: expression ? `(${expression}) "${location}"` : `"${location}"` }));
 }
