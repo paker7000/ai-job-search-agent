@@ -29,6 +29,7 @@ The app starts with the candidate facts and target preferences provided for this
 - Paste a job URL manually, or enter a Greenhouse public board token and select **Fetch public roles**. The app uses Greenhouse's documented public Job Board API. It does not crawl arbitrary URLs or submit applications.
 - Edit the search plan's title keywords, company suggestions, and locations (prefilled with Mexico, Monterrey area, and Texas). Each location produces its own query.
 - Search five general sites and five remote-work sites using direct links. Import matches from the Remote OK public feed; other destinations remain link-outs where automated reuse is restricted or not authorized.
+- Review ranked results in a table. Filters cover keywords, searched location, posted date, stated salary, work mode, employment type, and application status. Match explanations and evidence trails remain available per job.
 - A source run records its outcome, and each changed field retains its source URL and retrieval timestamp.
 - The Greenhouse token is stored locally in SQLite and reused by scheduled discovery.
 - Unknown work-location eligibility remains unknown. Review the posting evidence; the app does not infer visa or work authorization.

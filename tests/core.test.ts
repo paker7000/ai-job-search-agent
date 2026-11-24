@@ -5,6 +5,7 @@ import { assessEligibility, buildLocationSearchQueries, jobDedupeKey, matchJob }
 import { generateMaterials, saveMaterial } from "@/services/materials";
 import { destinationSearchUrl, matchesRemoteOkLocation, searchDestinations } from "@/services/discovery/destinations";
 import { runRemoteOkSearch } from "@/services/discovery/remoteok";
+import { filterAndSortJobs } from "@/services/job-search";
 import type { JobInput } from "@/domain/types";
 
 const role:JobInput={title:"Technical Solutions Architect",company:"Example Fintech",description:"Work from anywhere in Mexico. REST API and Snowflake integrations for financial risk software.",location:"Remote",url:"https://jobs.example.com/role/123?utm_source=mail",source:"manual",remote:true,eligibility:"unknown",eligibilityEvidence:""};
@@ -59,6 +60,30 @@ describe("search destinations and Remote OK adapter",()=>{
     expect(job.evidence.some((item)=>item.field==="searchLocation"&&item.value==="Mexico")).toBe(true);
     expect(job.evidence.some((item)=>item.field==="searchLocation"&&item.value==="Texas")).toBe(true);
     expect(job.evidence.every((item)=>item.sourceUrl===job.url)).toBe(true);
+  });
+});
+
+describe("ranked results filters and sorting",()=>{
+  const withMetadata=(input:Partial<JobInput>&Pick<JobInput,"title"|"company"|"url">):JobInput=>({...role,...input,description:input.description??"API and financial platform support",source:input.source??"manual",location:input.location??"Remote",remote:input.remote??false,eligibility:input.eligibility??"unknown",eligibilityEvidence:input.eligibilityEvidence??""});
+  it("filters by posted date, search-query location, salary status, work type, and employment type",()=>{
+    const recent=jobRepo.upsert(withMetadata({title:"Technical Account Manager",company:"MSCI",url:"https://jobs.example.com/recent",publishedAt:"2026-10-28T12:00:00.000Z",salary:"100000–120000",employmentType:"Full-time",workType:"Remote",remote:true,searchLocation:"Mexico"}));
+    const older=jobRepo.upsert(withMetadata({title:"Data Analyst",company:"Example Data",url:"https://jobs.example.com/older",publishedAt:"2026-10-01T12:00:00.000Z"}));
+    expect(recent.publishedAt).toBe("2026-10-28T12:00:00.000Z");expect(recent.evidence.some((item)=>item.field==="searchLocation"&&item.value==="Mexico")).toBe(true);expect(recent.salary).toBe("100000–120000");expect(recent.employmentType).toBe("Full-time");expect(recent.workType).toBe("Remote");
+    const filters={keyword:"",queryLocation:"Mexico",status:"all",postedWithinDays:5,workMode:"remote" as const,salary:"listed" as const,employmentType:"Full-time"};
+    expect(filterAndSortJobs([recent],{...filters,queryLocation:"",postedWithinDays:null,workMode:"all",salary:"all",employmentType:""},"fit")).toHaveLength(1);
+    expect(filterAndSortJobs([recent],{...filters,postedWithinDays:null,workMode:"all",salary:"all",employmentType:""},"fit")).toHaveLength(1);
+    expect(filterAndSortJobs([recent],{...filters,queryLocation:"",workMode:"all",salary:"all",employmentType:""},"fit",Date.parse("2026-10-29T12:00:00.000Z"))).toHaveLength(1);
+    expect(filterAndSortJobs([older,recent],filters,"fit",Date.parse("2026-10-29T12:00:00.000Z")).map((job)=>job.id)).toEqual([recent.id]);
+    expect(filterAndSortJobs([older,recent],{...filters,workMode:"unknown",queryLocation:"",postedWithinDays:null,salary:"all",employmentType:""},"fit",Date.parse("2026-10-29T12:00:00.000Z")).map((job)=>job.id)).toEqual([older.id]);
+  });
+  it("sorts by match, newest date, role, and company without changing the stored match score",()=>{
+    const first=jobRepo.upsert(withMetadata({title:"Technical Account Manager",company:"Zebra",url:"https://jobs.example.com/a",publishedAt:"2026-10-27T12:00:00.000Z"}));
+    const second=jobRepo.upsert(withMetadata({title:"Data Analyst",company:"Alpha",url:"https://jobs.example.com/b",publishedAt:"2026-10-28T12:00:00.000Z"}));
+    const filters={keyword:"",queryLocation:"",status:"all",postedWithinDays:null,workMode:"all" as const,salary:"all" as const,employmentType:""};
+    expect(filterAndSortJobs([first,second],filters,"newest")[0].id).toBe(second.id);
+    expect(filterAndSortJobs([first,second],filters,"role")[0].title).toBe("Data Analyst");
+    expect(filterAndSortJobs([first,second],filters,"company")[0].company).toBe("Alpha");
+    expect(filterAndSortJobs([first,second],filters,"fit")[0].match.score).toBeGreaterThanOrEqual(filterAndSortJobs([first,second],filters,"fit")[1].match.score);
   });
 });
 
