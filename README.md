@@ -30,15 +30,15 @@ The app starts with the candidate facts and target preferences provided for this
 
 ## Discover jobs
 
-- Paste a job URL manually, or enter a Greenhouse public board token and select **Fetch public roles**. The app uses Greenhouse's documented public Job Board API. It does not crawl arbitrary URLs or submit applications.
+- Paste a job URL manually, or use **Find relevant Greenhouse boards** in Discovery. The app retrieves the StoreSignal ATS board directory on demand, searches company names/slugs, previews live postings against your saved keyword/location preferences, and lets you select boards for scheduled imports. The CSV is CC BY 4.0 and is attributed in the dashboard. Greenhouse's documented public API returns all postings on a known board, so job filters run locally after retrieval. You can still enter a board token and select **Fetch public roles** for an immediate filtered import.
 - Edit the search plan's title keywords, company suggestions, and locations (prefilled with Mexico, Monterrey area, and Texas). Each location produces its own query.
 - Search five general sites and five remote-work sites using direct links. Import matches from the Remote OK public feed; other destinations remain link-outs where automated reuse is restricted or not authorized.
 - Review ranked results in a table. Filters cover keywords, searched location, posted date, stated salary, work mode, employment type, and application status. Match explanations and evidence trails remain available per job.
 - A source run records its outcome, and each changed field retains its source URL and retrieval timestamp.
-- The Greenhouse token is stored locally in SQLite and reused by scheduled discovery.
+- Selected Greenhouse boards are stored locally in SQLite and reused by scheduled discovery. The board directory snapshot is cached locally until you refresh it.
 - Unknown work-location eligibility remains unknown. Review the posting evidence; the app does not infer visa or work authorization.
 
-The protected daily-discovery endpoint searches the configured Greenhouse board, if any, and Remote OK. It runs the sources in sequence, records each source's success or failure, and still attempts the second source if the first one fails. To run it manually:
+The protected daily-discovery endpoint searches selected Greenhouse boards and Remote OK. Greenhouse boards are checked sequentially with a one-second gap; each board and source reports fetched, matched, imported, and failed counts. Remote OK uses the saved search preferences. To run it manually:
 
 ```powershell
 & .\scripts\run-daily-discovery.ps1

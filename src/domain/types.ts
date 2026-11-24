@@ -15,6 +15,21 @@ export interface SearchPreferences {
   companyKeywords: string[];
 }
 
+export interface GreenhouseDirectoryBoard {
+  slug: string;
+  companyName: string;
+  openJobs: number;
+  boardUrl: string;
+}
+
+export interface GreenhouseBoard {
+  token: string;
+  company: string;
+  boardUrl: string;
+  openJobsSnapshot: number;
+  addedAt: string;
+}
+
 export type SearchDestinationGroup = "general" | "remote";
 export interface SearchDestination {
   id: string;
