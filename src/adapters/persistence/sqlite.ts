@@ -2,7 +2,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Approval, CandidateProfile, Evidence, Job, JobInput, SearchPreferences } from "@/domain/types";
+import type { Approval, CandidateProfile, Evidence, GreenhouseBoard, GreenhouseDirectoryBoard, Job, JobInput, SearchPreferences } from "@/domain/types";
 import { assessEligibility, jobDedupeKey, matchJob } from "@/domain/matching";
 import type { ApprovalRepository, JobRepository, ProfileRepository, SearchPreferencesRepository } from "./repository";
 
@@ -40,9 +40,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, approval_id TEXT, event TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS greenhouse_boards (token TEXT PRIMARY KEY, company TEXT NOT NULL, board_url TEXT NOT NULL, open_jobs_snapshot INTEGER NOT NULL DEFAULT 0, added_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS discovery_runs (id TEXT PRIMARY KEY, source TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT NOT NULL, status TEXT NOT NULL, imported INTEGER NOT NULL, error TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS application_materials (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE, kind TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 `);
+
+const discoveryColumns = new Set((database.prepare("PRAGMA table_info(discovery_runs)").all() as Array<{ name: string }>).map((column) => column.name));
+for (const [column, definition] of [["fetched", "INTEGER NOT NULL DEFAULT 0"], ["matched", "INTEGER NOT NULL DEFAULT 0"]] as const) {
+  if (!discoveryColumns.has(column)) database.exec(`ALTER TABLE discovery_runs ADD COLUMN ${column} ${definition}`);
+}
+
+const legacyGreenhouseBoard = database.prepare("SELECT value FROM settings WHERE key='greenhouse-board-token'").get() as { value: string } | undefined;
+if (legacyGreenhouseBoard?.value && /^[A-Za-z0-9_-]{1,100}$/.test(legacyGreenhouseBoard.value)) {
+  database.prepare("INSERT OR IGNORE INTO greenhouse_boards (token,company,board_url,open_jobs_snapshot,added_at) VALUES (?,?,?,?,?)")
+    .run(legacyGreenhouseBoard.value, legacyGreenhouseBoard.value, `https://boards.greenhouse.io/${legacyGreenhouseBoard.value}`, 0, new Date().toISOString());
+}
 
 const jobColumns = new Set((database.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>).map((column) => column.name));
 for (const [column, definition] of [["published_at", "TEXT"], ["salary", "TEXT"], ["employment_type", "TEXT"], ["work_type", "TEXT"]] as const) {
@@ -144,6 +156,31 @@ export const searchPreferencesRepo: SearchPreferencesRepository = {
     database.prepare("INSERT INTO settings (key,value) VALUES ('search_preferences',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
       .run(JSON.stringify(cleaned));
     return cleaned;
+  },
+};
+
+export const greenhouseBoardRepo = {
+  all(): GreenhouseBoard[] {
+    return database.prepare("SELECT token,company,board_url as boardUrl,open_jobs_snapshot as openJobsSnapshot,added_at as addedAt FROM greenhouse_boards ORDER BY company COLLATE NOCASE")
+      .all() as unknown as GreenhouseBoard[];
+  },
+  add(board: Pick<GreenhouseBoard, "token" | "company" | "boardUrl" | "openJobsSnapshot">): GreenhouseBoard {
+    const addedAt = new Date().toISOString();
+    database.prepare("INSERT INTO greenhouse_boards (token,company,board_url,open_jobs_snapshot,added_at) VALUES (?,?,?,?,?) ON CONFLICT(token) DO UPDATE SET company=excluded.company,board_url=excluded.board_url,open_jobs_snapshot=excluded.open_jobs_snapshot")
+      .run(board.token, board.company, board.boardUrl, board.openJobsSnapshot, addedAt);
+    return this.all().find((item) => item.token === board.token)!;
+  },
+  remove(token: string): boolean {
+    return database.prepare("DELETE FROM greenhouse_boards WHERE token=?").run(token).changes > 0;
+  },
+  directorySnapshot(): { retrievedAt: string; boards: GreenhouseDirectoryBoard[] } | null {
+    const row = database.prepare("SELECT value FROM settings WHERE key='greenhouse_directory_cache'").get() as { value: string } | undefined;
+    if (!row) return null;
+    try { return JSON.parse(row.value) as { retrievedAt: string; boards: GreenhouseDirectoryBoard[] }; } catch { return null; }
+  },
+  saveDirectorySnapshot(snapshot: { retrievedAt: string; boards: GreenhouseDirectoryBoard[] }): void {
+    database.prepare("INSERT INTO settings (key,value) VALUES ('greenhouse_directory_cache',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .run(JSON.stringify(snapshot));
   },
 };
 

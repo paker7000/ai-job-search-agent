@@ -9,16 +9,20 @@ A local-first browser app for evidence-based job discovery, fit review, applicat
 
 ## Start and stop locally (Windows PowerShell)
 
-Open PowerShell in the project folder. On the first run, install dependencies; then set local secrets and start the development server:
+Open PowerShell in the project folder. On the first run, install dependencies and create an ignored local secrets file:
 
 ```powershell
 npm install
-$env:SESSION_SECRET = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$env:SCHEDULE_SECRET = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+if (-not (Test-Path .env.local)) {
+  Copy-Item .env.example .env.local
+  $sessionSecret = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+  $scheduleSecret = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+  @("SESSION_SECRET=$sessionSecret", "SCHEDULE_SECRET=$scheduleSecret") | Set-Content .env.local
+}
 npm run dev -- --hostname 127.0.0.1
 ```
 
-Keep that terminal open while using the app at [http://localhost:3000](http://localhost:3000). To stop it, focus the same terminal and press **Ctrl+C**. Run the commands again to start it later. Generating a new `SESSION_SECRET` on restart invalidates existing browser sessions, so sign in again; it does not delete the local account or database. No AI key is needed. The default database is `data/agent.sqlite`; override it with `DATABASE_PATH`.
+Keep that terminal open while using the app at [http://localhost:3000](http://localhost:3000). To stop it, focus the same terminal and press **Ctrl+C**. Run `npm run dev -- --hostname 127.0.0.1` again to start it later. Keep `.env.local` unchanged between restarts so browser sessions remain valid. No AI key is needed. The default database is `data/agent.sqlite`; override it with `DATABASE_PATH`.
 
 On first use, create the single local account with a unique password of at least 12 characters. In production, configure a persistent `SESSION_SECRET` or sessions will be invalidated when it changes.
 
@@ -26,25 +30,25 @@ The app starts with the candidate facts and target preferences provided for this
 
 ## Discover jobs
 
-- Paste a job URL manually, or enter a Greenhouse public board token and select **Fetch public roles**. The app uses Greenhouse's documented public Job Board API. It does not crawl arbitrary URLs or submit applications.
+- Paste a job URL manually, or use **Find relevant Greenhouse boards** in Discovery. The app retrieves the StoreSignal ATS board directory on demand, searches company names/slugs, previews live postings against your saved keyword/location preferences, and lets you select boards for scheduled imports. The CSV is CC BY 4.0 and is attributed in the dashboard. Greenhouse's documented public API returns all postings on a known board, so job filters run locally after retrieval. You can still enter a board token and select **Fetch public roles** for an immediate filtered import.
 - Edit the search plan's title keywords, company suggestions, and locations (prefilled with Mexico, Monterrey area, and Texas). Each location produces its own query.
 - Search five general sites and five remote-work sites using direct links. Import matches from the Remote OK public feed; other destinations remain link-outs where automated reuse is restricted or not authorized.
 - Review ranked results in a table. Filters cover keywords, searched location, posted date, stated salary, work mode, employment type, and application status. Match explanations and evidence trails remain available per job.
 - A source run records its outcome, and each changed field retains its source URL and retrieval timestamp.
-- The Greenhouse token is stored locally in SQLite and reused by scheduled discovery.
+- Selected Greenhouse boards are stored locally in SQLite and reused by scheduled discovery. The board directory snapshot is cached locally until you refresh it.
 - Unknown work-location eligibility remains unknown. Review the posting evidence; the app does not infer visa or work authorization.
 
-To invoke the protected daily-discovery endpoint after configuring a board token, run:
+The protected daily-discovery endpoint searches selected Greenhouse boards and Remote OK. Greenhouse boards are checked sequentially with a one-second gap; each board and source reports fetched, matched, imported, and failed counts. Remote OK uses the saved search preferences. To run it manually:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/api/scheduled/discover' -Headers @{ Authorization = "Bearer $env:SCHEDULE_SECRET" }
+& .\scripts\run-daily-discovery.ps1
 ```
 
-This endpoint is ready for a scheduler you operate. No scheduler or hosting service is created or configured by the app. Do not expose the local app publicly without a security review.
+To schedule it on Windows without a hosted service, use Task Scheduler: create a daily task that runs `powershell.exe` with arguments `-NoProfile -ExecutionPolicy Bypass -File "C:\dev\ai-job-search-agent\scripts\run-daily-discovery.ps1"`. Run it as your logged-in Windows user. The local app must already be running at `127.0.0.1:3000` when the task fires; the task sends only the protected local request. No scheduled task is created automatically. Do not expose the local app publicly without a security review.
 
 ## Approval and application materials
 
-The dashboard can create action-specific approval records and record approve/reject decisions. Approval does not trigger an external action: there is no application, email, or recruiter-message executor in v0.1. Generated cover-letter and resume-highlight drafts use the saved candidate profile only; review, edit, and verify them before use.
+Use **Quick review** to inspect one ranked role at a time. Swipe or choose **Shortlist** / **Skip**; these actions only update local tracking. **Review docs** opens editable cover-letter and resume-highlight drafts generated from the saved candidate profile. Save and download the drafts, then open the employer's application page in a separate tab and submit there yourself. Only after submission should you choose **I submitted this application** to record the local status. The app never uploads a document or submits an application. Existing action-specific approval records are audit-only and do not trigger an external action. Review every generated statement before use.
 
 ## Checks
 

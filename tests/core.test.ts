@@ -1,15 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { approvalRepo, database, jobRepo, profileRepo, searchPreferencesRepo } from "@/adapters/persistence/sqlite";
+import { approvalRepo, database, greenhouseBoardRepo, jobRepo, profileRepo, searchPreferencesRepo } from "@/adapters/persistence/sqlite";
 import { createAccount, login, setupStatus, verifySessionCookie } from "@/lib/auth";
 import { assessEligibility, buildLocationSearchQueries, jobDedupeKey, matchJob } from "@/domain/matching";
 import { generateMaterials, saveMaterial } from "@/services/materials";
 import { destinationSearchUrl, matchesRemoteOkLocation, searchDestinations } from "@/services/discovery/destinations";
 import { runRemoteOkSearch } from "@/services/discovery/remoteok";
 import { filterAndSortJobs } from "@/services/job-search";
+import { runDailyDiscovery } from "@/services/discovery/daily";
+import { matchesGreenhouseLocation, previewGreenhouseBoard, runGreenhouseDiscovery } from "@/services/discovery/greenhouse";
+import { refreshGreenhouseDirectory, searchGreenhouseDirectory } from "@/services/discovery/greenhouse-directory";
+import { POST as scheduledDiscoveryPost } from "@/app/api/scheduled/discover/route";
 import type { JobInput } from "@/domain/types";
 
 const role:JobInput={title:"Technical Solutions Architect",company:"Example Fintech",description:"Work from anywhere in Mexico. REST API and Snowflake integrations for financial risk software.",location:"Remote",url:"https://jobs.example.com/role/123?utm_source=mail",source:"manual",remote:true,eligibility:"unknown",eligibilityEvidence:""};
-beforeEach(()=>{database.exec("DELETE FROM approvals; DELETE FROM audit_log; DELETE FROM evidence; DELETE FROM jobs; DELETE FROM profile; DELETE FROM sessions; DELETE FROM auth_failures; DELETE FROM users; DELETE FROM discovery_runs; DELETE FROM settings WHERE key='search_preferences';");});
+beforeEach(()=>{database.exec("DELETE FROM approvals; DELETE FROM audit_log; DELETE FROM evidence; DELETE FROM jobs; DELETE FROM profile; DELETE FROM sessions; DELETE FROM auth_failures; DELETE FROM users; DELETE FROM discovery_runs; DELETE FROM greenhouse_boards; DELETE FROM settings WHERE key IN ('search_preferences','greenhouse_directory_cache','greenhouse-board-token');");});
 afterEach(()=>vi.unstubAllGlobals());
 
 describe("search preferences and query generation",()=>{
@@ -63,6 +67,50 @@ describe("search destinations and Remote OK adapter",()=>{
   });
 });
 
+describe("Greenhouse board directory and filtering",()=>{
+  it("downloads and parses the CSV directory, including quoted company names",async()=>{
+    const csv='ats,slug,company_name,open_jobs,board_url,api_url\ngreenhouse,acme,"Acme, Inc.",4,https://boards.greenhouse.io/acme,https://boards-api.greenhouse.io/v1/boards/acme/jobs\nlever,other,Other Co,2,https://jobs.lever.co/other,https://api.lever.co/other';
+    const fetcher=vi.fn().mockResolvedValue(new Response(csv,{status:200,headers:{"content-type":"text/csv"}}));
+    const snapshot=await refreshGreenhouseDirectory(fetcher);
+    expect(snapshot.boards).toEqual([{slug:"acme",companyName:"Acme, Inc.",openJobs:4,boardUrl:"https://boards.greenhouse.io/acme"}]);
+    expect((await searchGreenhouseDirectory("acme",fetcher)).candidates[0].slug).toBe("acme");
+  });
+  it("persists selected boards and removes them by token",()=>{
+    greenhouseBoardRepo.add({token:"acme",company:"Acme, Inc.",boardUrl:"https://boards.greenhouse.io/acme",openJobsSnapshot:4});
+    expect(greenhouseBoardRepo.all()).toMatchObject([{token:"acme",company:"Acme, Inc.",openJobsSnapshot:4}]);
+    expect(greenhouseBoardRepo.remove("acme")).toBe(true);
+    expect(greenhouseBoardRepo.all()).toHaveLength(0);
+  });
+  it("matches explicit locations while leaving broad remote eligibility unasserted",()=>{
+    expect(matchesGreenhouseLocation("Monterrey, Nuevo León, Mexico","Mexico")).toBe(true);
+    expect(matchesGreenhouseLocation("Austin, TX","Texas")).toBe(true);
+    expect(matchesGreenhouseLocation("Remote - Worldwide","Mexico")).toBe(true);
+    expect(matchesGreenhouseLocation("New York, NY","Texas")).toBe(false);
+  });
+  it("previews only jobs matching saved role and location preferences",async()=>{
+    searchPreferencesRepo.save({locations:["Mexico","Texas"],titleKeywords:["Solutions Architect"],companyKeywords:[]});
+    const fetcher=vi.fn().mockResolvedValue(new Response(JSON.stringify({jobs:[
+      {title:"Solutions Architect",absolute_url:"https://boards.greenhouse.io/acme/jobs/1",location:{name:"Monterrey, Mexico"},content:"API integrations"},
+      {title:"Accountant",absolute_url:"https://boards.greenhouse.io/acme/jobs/2",location:{name:"Austin, TX"},content:"Finance"},
+    ]}),{status:200}));
+    const preview=await previewGreenhouseBoard("acme","Acme",searchPreferencesRepo.get(),fetcher);
+    expect(preview).toMatchObject({fetched:2,matched:1,matches:[{title:"Solutions Architect",location:"Monterrey, Mexico"}]});
+  });
+  it("imports only matching Greenhouse roles and keeps unknown work eligibility unknown",async()=>{
+    const preferences={locations:["Mexico"],titleKeywords:["Technical Account Manager"],companyKeywords:[]};
+    searchPreferencesRepo.save(preferences);
+    const fetcher=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({jobs:[
+      {title:"Technical Account Manager",absolute_url:"https://boards.greenhouse.io/acme/jobs/11",location:{name:"Remote - Worldwide"},content:"Customer API integrations"},
+      {title:"Financial Accountant",absolute_url:"https://boards.greenhouse.io/acme/jobs/12",location:{name:"Austin, TX"},content:"Accounting"},
+    ]}),{status:200}));
+    const result=await runGreenhouseDiscovery("acme","Acme",preferences,fetcher);
+    expect(result).toMatchObject({fetched:2,matched:1,imported:1});
+    expect(jobRepo.all()).toHaveLength(1);
+    expect(jobRepo.all()[0]).toMatchObject({title:"Technical Account Manager",company:"Acme",eligibility:"unknown"});
+    expect(jobRepo.all()[0].evidence.some((item)=>item.field==="searchLocation"&&item.value==="Mexico")).toBe(true);
+  });
+});
+
 describe("ranked results filters and sorting",()=>{
   const withMetadata=(input:Partial<JobInput>&Pick<JobInput,"title"|"company"|"url">):JobInput=>({...role,...input,description:input.description??"API and financial platform support",source:input.source??"manual",location:input.location??"Remote",remote:input.remote??false,eligibility:input.eligibility??"unknown",eligibilityEvidence:input.eligibilityEvidence??""});
   it("filters by posted date, search-query location, salary status, work type, and employment type",()=>{
@@ -87,7 +135,46 @@ describe("ranked results filters and sorting",()=>{
   });
 });
 
+describe("daily discovery orchestration and access control",()=>{
+  it("runs configured sources sequentially and continues after a source failure",async()=>{
+    const calls:string[]=[];
+    const result=await runDailyDiscovery([{token:"greenhouse-board",company:"Example"}],{
+      greenhouse:async()=>{calls.push("Greenhouse");throw new Error("board unavailable");},
+      remoteOk:async()=>{calls.push("Remote OK");return {fetched:3,matched:3,imported:3,retrievedAt:"2026-10-29T00:00:00.000Z",searches:["Mexico"],source:"Remote OK"};},
+    });
+    expect(calls).toEqual(["Greenhouse","Remote OK"]);
+    expect(result).toMatchObject({status:"partial",imported:3,sources:[{source:"Greenhouse",status:"failed"},{source:"Remote OK",status:"success",imported:3}]});
+  });
+  it("runs Remote OK without a Greenhouse token and reports a skipped source",async()=>{
+    const greenhouse=vi.fn();const remoteOk=vi.fn().mockResolvedValue({fetched:0,matched:0,imported:0,retrievedAt:"2026-10-29T00:00:00.000Z",searches:["Mexico"],source:"Remote OK"});
+    const result=await runDailyDiscovery([],{greenhouse,remoteOk});
+    expect(greenhouse).not.toHaveBeenCalled();expect(remoteOk).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({status:"success",sources:[{source:"Greenhouse",status:"skipped"},{source:"Remote OK",status:"success"}]});
+  });
+  it("runs selected Greenhouse boards sequentially and reports per-board counts",async()=>{
+    const calls:string[]=[];
+    const result=await runDailyDiscovery([{token:"first",company:"First"},{token:"second",company:"Second"}],{
+      greenhouse:async(token,company)=>{calls.push(token);return {token,company,fetched:8,matched:2,imported:2,retrievedAt:"2026-10-29T00:00:00.000Z",matches:[]};},
+      remoteOk:async()=>({fetched:0,matched:0,imported:0,retrievedAt:"2026-10-29T00:00:00.000Z",searches:["Mexico"],source:"Remote OK"}),
+    });
+    expect(calls).toEqual(["first","second"]);
+    expect(result.sources[0]).toMatchObject({source:"Greenhouse",status:"success",fetched:16,matched:4,imported:4,boards:[{company:"First",fetched:8,matched:2},{company:"Second",fetched:8,matched:2}]});
+  });
+  it("rejects daily discovery without the exact bearer secret",async()=>{
+    const prior=process.env.SCHEDULE_SECRET;process.env.SCHEDULE_SECRET="expected-secret";
+    try {
+      const response=await scheduledDiscoveryPost(new Request("http://localhost/api/scheduled/discover",{method:"POST",headers:{authorization:"Bearer wrong-secret"}}));
+      expect(response.status).toBe(401);expect(await response.json()).toMatchObject({error:"Unauthorized"});
+    } finally { if(prior===undefined)delete process.env.SCHEDULE_SECRET;else process.env.SCHEDULE_SECRET=prior; }
+  });
+});
+
 describe("job evidence and matching",()=>{
+  it("records skipped roles separately so swipe review can move to the next job",()=>{
+    const job=jobRepo.upsert(role);
+    expect(jobRepo.update(job.id,{status:"skipped"})?.status).toBe("skipped");
+    expect(jobRepo.all()[0].status).toBe("skipped");
+  });
   it("deduplicates tracking parameters but keeps functional job identifiers",()=>{
     expect(jobDedupeKey(role.url)).toBe("https://jobs.example.com/role/123");
     expect(jobDedupeKey("https://jobs.example.com/role?id=1")).not.toBe(jobDedupeKey("https://jobs.example.com/role?id=2"));

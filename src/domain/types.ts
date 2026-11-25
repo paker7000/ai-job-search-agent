@@ -1,5 +1,5 @@
 export type Eligibility = "supported" | "contradicted" | "unknown";
-export type ApplicationStatus = "discovered" | "interested" | "preparing" | "applied" | "interviewing" | "offer" | "rejected" | "archived";
+export type ApplicationStatus = "discovered" | "interested" | "skipped" | "preparing" | "applied" | "interviewing" | "offer" | "rejected" | "archived";
 
 export interface CandidateProfile {
   summary: string;
@@ -13,6 +13,21 @@ export interface SearchPreferences {
   locations: string[];
   titleKeywords: string[];
   companyKeywords: string[];
+}
+
+export interface GreenhouseDirectoryBoard {
+  slug: string;
+  companyName: string;
+  openJobs: number;
+  boardUrl: string;
+}
+
+export interface GreenhouseBoard {
+  token: string;
+  company: string;
+  boardUrl: string;
+  openJobsSnapshot: number;
+  addedAt: string;
 }
 
 export type SearchDestinationGroup = "general" | "remote";
