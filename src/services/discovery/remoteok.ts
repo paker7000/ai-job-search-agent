@@ -80,7 +80,7 @@ export async function runRemoteOkSearch() {
     const postings = raw.filter((entry): entry is RemoteOkJob => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
       .slice(0, 250).filter((entry) => typeof entry.position === "string" && typeof entry.company === "string");
     const retrievedAt = new Date().toISOString();
-    let imported = 0;
+    let imported = 0, matched = 0;
     for (const posting of postings) {
       const url = safeRemoteOkUrl(posting.url);
       if (!url || !matchesTerms(posting, preferences.titleKeywords, preferences.companyKeywords)) continue;
@@ -88,6 +88,7 @@ export async function runRemoteOkSearch() {
       const location = (posting.location ?? "Not specified").slice(0, 500);
       for (const query of queries) {
         if (!matchesRemoteOkLocation(location, query.location)) continue;
+        matched++;
         const evidence = eligibilityEvidence(posting);
         const min = Number(posting.salary_min ?? 0), max = Number(posting.salary_max ?? 0);
         const salary = posting.salary?.slice(0, 240) || (min || max ? [min || "", max || ""].filter(Boolean).join("–") : undefined);
@@ -100,12 +101,12 @@ export async function runRemoteOkSearch() {
         imported++;
       }
     }
-    database.prepare("INSERT INTO discovery_runs (id,source,started_at,finished_at,status,imported,error) VALUES (?,?,?,?,?,?,?)")
-      .run(randomUUID(), "Remote OK", startedAt, new Date().toISOString(), "success", imported, "");
-    return { imported, retrievedAt, searches: queries.map((query) => query.location), source: "Remote OK" };
+    database.prepare("INSERT INTO discovery_runs (id,source,started_at,finished_at,status,fetched,matched,imported,error) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run(randomUUID(), "Remote OK", startedAt, new Date().toISOString(), "success", postings.length, matched, imported, "");
+    return { fetched: postings.length, matched, imported, retrievedAt, searches: queries.map((query) => query.location), source: "Remote OK" };
   } catch (error) {
-    database.prepare("INSERT INTO discovery_runs (id,source,started_at,finished_at,status,imported,error) VALUES (?,?,?,?,?,?,?)")
-      .run(randomUUID(), "Remote OK", startedAt, new Date().toISOString(), "failed", 0, error instanceof Error ? error.message : "Unknown discovery failure");
+    database.prepare("INSERT INTO discovery_runs (id,source,started_at,finished_at,status,fetched,matched,imported,error) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run(randomUUID(), "Remote OK", startedAt, new Date().toISOString(), "failed", 0, 0, 0, error instanceof Error ? error.message : "Unknown discovery failure");
     throw error;
   } finally { clearTimeout(timer); }
 }

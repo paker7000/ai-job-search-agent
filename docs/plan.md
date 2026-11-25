@@ -12,8 +12,9 @@ The initial profile is user-provided. All profile claims are candidate-reported 
 - Single-account first-run setup, password hashing, signed HTTP-only/SameSite cookies, and protected APIs.
 - Editable seeded candidate profile with visible review flags.
 - Manual HTTPS job URL entry and a Greenhouse Job Board API adapter. Manual URLs are stored as source evidence and never fetched.
-- Configurable Greenhouse public-board token saved locally; importer bounds responses, times out, validates board token and posting URLs, and records run success/failure.
-- Bearer-protected scheduled discovery route reuses the saved source and importer. A scheduler must be operated by the user.
+- Greenhouse board discovery uses the StoreSignal ATS directory CSV (CC BY 4.0 with dashboard attribution), caches it locally, searches company names/slugs, and previews live jobs against saved keyword/location preferences before a board is selected.
+- Selected Greenhouse boards are stored locally; importer bounds responses, times out, validates board tokens and posting URLs, and filters postings locally because Greenhouse's public list endpoint has no job-search parameters.
+- Bearer-protected scheduled discovery runs selected Greenhouse boards sequentially with a one-second gap plus Remote OK; source and per-board reports include fetched, matched, imported, skipped, and failure counts.
 - Job URL deduplication, field-level evidence history, deterministic component match scoring, explanations, and explicit supported/contradicted/unknown work-eligibility state.
 - Job tracking states and notes.
 - Editable template-generated cover letter and resume highlights drawn only from candidate profile text.
@@ -34,13 +35,13 @@ The approved technology choice was SQLite plus Prisma. The repository did not co
 
 - **Web/UI/API:** Next.js App Router with TypeScript.
 - **Persistence:** SQLite with repository interfaces. SQLite is simple and low-cost for local or single-instance use but has limited concurrent writes and requires persistent file storage, backup/restore, and migration planning. Reconsider Postgres for multi-instance or high-concurrency hosting.
-- **Discovery:** Server-side source adapters, separately bounded and observable. Greenhouse is the first adapter; manual links are never fetched. The scheduled route is called by a scheduler configured by the operator.
+- **Discovery:** Server-side source adapters, separately bounded and observable. Greenhouse's candidate-board directory is retrieved from a fixed Hugging Face URL and cached; only selected board tokens are queried. Manual job links are never fetched. The scheduled route is called by a scheduler configured by the operator.
 - **AI:** No AI dependency in the baseline. Matching and materials work deterministically without an API key.
 - **External actions:** approval records and decision checks only; no external execution in v0.1.
 
 ### Greenhouse access verification
 
-Verified against Greenhouse's official [Job Board API documentation](https://docs.greenhouse.io/job-board) and [API overview](https://support.greenhouse.io/hc/en-us/articles/10568627186203-Greenhouse-API-overview) on 2026-10-23. Greenhouse documents JSON GET endpoints for public job-board data and describes the API as a way to access public job posts. This app calls only the public job-list GET endpoint; the separate authenticated application-submission endpoint is not implemented or called. Users supply a board token.
+Verified against Greenhouse's official [Job Board API documentation](https://docs.greenhouse.io/job-board) and [API overview](https://support.greenhouse.io/hc/en-us/articles/10568627186203-Greenhouse-API-overview) on 2026-10-23. Greenhouse documents JSON GET endpoints for public job-board data and describes the API as a way to access public job posts. The list-jobs endpoint returns all published posts on a known board and documents `content=true`, but no keyword/location query filters; this app fetches a selected board and filters jobs locally. The separate authenticated application-submission endpoint is not implemented or called. Board tokens are sourced from the StoreSignal public CSV directory and user-confirmed before scheduled imports.
 
 ### Search destination and Remote OK access verification
 
@@ -70,7 +71,7 @@ docs/plan.md
 - **ApprovalRequest:** action, exact payload, payload hash, pending/approved/rejected state, expiry, decision time.
 - **AuditLog:** requested/approved/rejected/denied event history.
 - **ApplicationMaterial:** editable generated draft tied to a job and type.
-- **Settings:** local Greenhouse board token. It is a public-board identifier, not an API credential.
+- **Settings:** selected Greenhouse board tokens and cached directory snapshot. Board tokens are public identifiers, not API credentials.
 
 ## Matching and evidence
 
@@ -108,8 +109,9 @@ An authenticated user creates a request bound to a job, action, exact payload an
 - [x] Each selected location yields a distinct generated search query.
 - [x] Ten search destinations (five general and five remote-focused) listed in a provider registry; use documented feeds/APIs only where permitted and prefilled searches otherwise.
 - [x] Import matching Remote OK listings from its public feed with source credit, original job links, retrieval timestamps, and per-location query evidence.
+- [x] Retrieve and cache the CC BY 4.0 Greenhouse board directory, search candidate companies, preview live keyword/location matches, and persist user-selected boards.
 - [x] Ranked results presented in a sortable table with supported date, salary-status, work-mode, and employment-type filters.
-- [x] Protected daily discovery fans out to the configured Greenhouse board and Remote OK; failures are reported per source and do not prevent the other source from running.
+- [x] Protected daily discovery searches up to 25 selected Greenhouse boards sequentially plus Remote OK; failures are isolated and fetched/matched/imported counts are reported.
 - [x] Alerts and notifications remain out of scope.
 
 ### Evidence, matching, tracking, and materials
